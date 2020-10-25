@@ -1,7 +1,7 @@
 """
 YAML serializer.
 
-Requires PyYaml (http://pyyaml.org/), but that's checked for in __init__.
+Requires PyYaml (https://pyyaml.org/), but that's checked for in __init__.
 """
 
 import collections
@@ -18,10 +18,9 @@ from django.db import models
 
 # Use the C (faster) implementation if possible
 try:
-    from yaml import CSafeLoader as SafeLoader
-    from yaml import CSafeDumper as SafeDumper
+    from yaml import CSafeDumper as SafeDumper, CSafeLoader as SafeLoader
 except ImportError:
-    from yaml import SafeLoader, SafeDumper
+    from yaml import SafeDumper, SafeLoader
 
 
 class DjangoSafeDumper(SafeDumper):
@@ -34,12 +33,13 @@ class DjangoSafeDumper(SafeDumper):
 
 DjangoSafeDumper.add_representer(decimal.Decimal, DjangoSafeDumper.represent_decimal)
 DjangoSafeDumper.add_representer(collections.OrderedDict, DjangoSafeDumper.represent_ordered_dict)
+# Workaround to represent dictionaries in insertion order.
+# See https://github.com/yaml/pyyaml/pull/143.
+DjangoSafeDumper.add_representer(dict, DjangoSafeDumper.represent_ordered_dict)
 
 
 class Serializer(PythonSerializer):
-    """
-    Convert a queryset to YAML.
-    """
+    """Convert a queryset to YAML."""
 
     internal_use_only = False
 
@@ -53,29 +53,27 @@ class Serializer(PythonSerializer):
         if isinstance(field, models.TimeField) and getattr(obj, field.name) is not None:
             self._current[field.name] = str(getattr(obj, field.name))
         else:
-            super(Serializer, self).handle_field(obj, field)
+            super().handle_field(obj, field)
 
     def end_serialization(self):
+        self.options.setdefault('allow_unicode', True)
         yaml.dump(self.objects, self.stream, Dumper=DjangoSafeDumper, **self.options)
 
     def getvalue(self):
-        # Grand-parent super
+        # Grandparent super
         return super(PythonSerializer, self).getvalue()
 
 
 def Deserializer(stream_or_string, **options):
-    """
-    Deserialize a stream or string of YAML data.
-    """
+    """Deserialize a stream or string of YAML data."""
     if isinstance(stream_or_string, bytes):
-        stream_or_string = stream_or_string.decode('utf-8')
+        stream_or_string = stream_or_string.decode()
     if isinstance(stream_or_string, str):
         stream = StringIO(stream_or_string)
     else:
         stream = stream_or_string
     try:
-        for obj in PythonDeserializer(yaml.load(stream, Loader=SafeLoader), **options):
-            yield obj
+        yield from PythonDeserializer(yaml.load(stream, Loader=SafeLoader), **options)
     except (GeneratorExit, DeserializationError):
         raise
     except Exception as exc:

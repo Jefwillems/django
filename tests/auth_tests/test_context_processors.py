@@ -10,14 +10,10 @@ from .settings import AUTH_MIDDLEWARE, AUTH_TEMPLATES
 
 class MockUser:
     def has_module_perms(self, perm):
-        if perm == 'mockapp':
-            return True
-        return False
+        return perm == 'mockapp'
 
-    def has_perm(self, perm):
-        if perm == 'mockapp.someperm':
-            return True
-        return False
+    def has_perm(self, perm, obj=None):
+        return perm == 'mockapp.someperm'
 
 
 class PermWrapperTests(SimpleTestCase):
@@ -44,9 +40,9 @@ class PermWrapperTests(SimpleTestCase):
         perms = PermWrapper(MockUser())
         # Works for modules and full permissions.
         self.assertIn('mockapp', perms)
-        self.assertNotIn('nonexisting', perms)
+        self.assertNotIn('nonexistent', perms)
         self.assertIn('mockapp.someperm', perms)
-        self.assertNotIn('mockapp.nonexisting', perms)
+        self.assertNotIn('mockapp.nonexistent', perms)
 
     def test_permlookupdict_in(self):
         """
@@ -55,6 +51,10 @@ class PermWrapperTests(SimpleTestCase):
         pldict = PermLookupDict(MockUser(), 'mockapp')
         with self.assertRaises(TypeError):
             self.EQLimiterObject() in pldict
+
+    def test_iter(self):
+        with self.assertRaisesMessage(TypeError, 'PermWrapper is not iterable.'):
+            iter(PermWrapper(MockUser()))
 
 
 @override_settings(ROOT_URLCONF='auth_tests.urls', TEMPLATES=AUTH_TEMPLATES)
@@ -95,7 +95,7 @@ class AuthContextProcessorTests(TestCase):
         response = self.client.get('/auth_processor_perms/')
         self.assertContains(response, "Has auth permissions")
         self.assertContains(response, "Has auth.add_permission permissions")
-        self.assertNotContains(response, "nonexisting")
+        self.assertNotContains(response, "nonexistent")
 
     def test_perm_in_perms_attrs(self):
         u = User.objects.create_user(username='normal', password='secret')
@@ -107,7 +107,7 @@ class AuthContextProcessorTests(TestCase):
         response = self.client.get('/auth_processor_perm_in_perms/')
         self.assertContains(response, "Has auth permissions")
         self.assertContains(response, "Has auth.add_permission permissions")
-        self.assertNotContains(response, "nonexisting")
+        self.assertNotContains(response, "nonexistent")
 
     def test_message_attrs(self):
         self.client.force_login(self.superuser)

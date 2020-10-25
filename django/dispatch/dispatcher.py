@@ -1,7 +1,8 @@
-import sys
 import threading
+import warnings
 import weakref
 
+from django.utils.deprecation import RemovedInDjango40Warning
 from django.utils.inspect import func_accepts_kwargs
 
 
@@ -29,14 +30,16 @@ class Signal:
     def __init__(self, providing_args=None, use_caching=False):
         """
         Create a new signal.
-
-        providing_args
-            A list of the arguments this signal can pass along in a send() call.
         """
         self.receivers = []
-        if providing_args is None:
-            providing_args = []
-        self.providing_args = set(providing_args)
+        if providing_args is not None:
+            warnings.warn(
+                'The providing_args argument is deprecated. As it is purely '
+                'documentational, it has no replacement. If you rely on this '
+                'argument as documentation, you can move the text to a code '
+                'comment or docstring.',
+                RemovedInDjango40Warning, stacklevel=2,
+            )
         self.lock = threading.Lock()
         self.use_caching = use_caching
         # For convenience we create empty caches even if they are not used.
@@ -107,10 +110,7 @@ class Signal:
 
         with self.lock:
             self._clear_dead_receivers()
-            for r_key, _ in self.receivers:
-                if r_key == lookup_key:
-                    break
-            else:
+            if not any(r_key == lookup_key for r_key, _ in self.receivers):
                 self.receivers.append((lookup_key, receiver))
             self.sender_receivers_cache.clear()
 
@@ -119,7 +119,7 @@ class Signal:
         Disconnect receiver from sender for signal.
 
         If weak references are used, disconnect need not be called. The receiver
-        will be remove from dispatch automatically.
+        will be removed from dispatch automatically.
 
         Arguments:
 
@@ -169,7 +169,7 @@ class Signal:
             named
                 Named arguments which will be passed to receivers.
 
-        Returns a list of tuple pairs [(receiver, response), ... ].
+        Return a list of tuple pairs [(receiver, response), ... ].
         """
         if not self.receivers or self.sender_receivers_cache.get(sender) is NO_RECEIVERS:
             return []
@@ -186,22 +186,17 @@ class Signal:
         Arguments:
 
             sender
-                The sender of the signal. Can be any python object (normally one
+                The sender of the signal. Can be any Python object (normally one
                 registered with a connect if you actually want something to
                 occur).
 
             named
-                Named arguments which will be passed to receivers. These
-                arguments must be a subset of the argument names defined in
-                providing_args.
+                Named arguments which will be passed to receivers.
 
-        Return a list of tuple pairs [(receiver, response), ... ]. May raise
-        DispatcherKeyError.
+        Return a list of tuple pairs [(receiver, response), ... ].
 
         If any receiver raises an error (specifically any subclass of
-        Exception), the error instance is returned as the result for that
-        receiver. The traceback is always attached to the error at
-        ``__traceback__``.
+        Exception), return the error instance as the result for that receiver.
         """
         if not self.receivers or self.sender_receivers_cache.get(sender) is NO_RECEIVERS:
             return []
@@ -213,8 +208,6 @@ class Signal:
             try:
                 response = receiver(signal=self, sender=sender, **named)
             except Exception as err:
-                if not hasattr(err, '__traceback__'):
-                    err.__traceback__ = sys.exc_info()[2]
                 responses.append((receiver, err))
             else:
                 responses.append((receiver, response))
@@ -224,12 +217,10 @@ class Signal:
         # Note: caller is assumed to hold self.lock.
         if self._dead_receivers:
             self._dead_receivers = False
-            new_receivers = []
-            for r in self.receivers:
-                if isinstance(r[1], weakref.ReferenceType) and r[1]() is None:
-                    continue
-                new_receivers.append(r)
-            self.receivers = new_receivers
+            self.receivers = [
+                r for r in self.receivers
+                if not(isinstance(r[1], weakref.ReferenceType) and r[1]() is None)
+            ]
 
     def _live_receivers(self, sender):
         """

@@ -23,10 +23,13 @@ class OracleGeometryColumns(models.Model):
         db_table = 'USER_SDO_GEOM_METADATA'
         managed = False
 
+    def __str__(self):
+        return '%s - %s (SRID: %s)' % (self.table_name, self.column_name, self.srid)
+
     @classmethod
     def table_name_col(cls):
         """
-        Returns the name of the metadata column used to store the feature table
+        Return the name of the metadata column used to store the feature table
         name.
         """
         return 'table_name'
@@ -34,13 +37,10 @@ class OracleGeometryColumns(models.Model):
     @classmethod
     def geom_col_name(cls):
         """
-        Returns the name of the metadata column used to store the feature
+        Return the name of the metadata column used to store the feature
         geometry column.
         """
         return 'column_name'
-
-    def __str__(self):
-        return '%s - %s (SRID: %s)' % (self.table_name, self.column_name, self.srid)
 
 
 class OracleSpatialRefSys(models.Model, SpatialRefSysMixin):

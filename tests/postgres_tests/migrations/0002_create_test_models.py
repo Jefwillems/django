@@ -1,10 +1,9 @@
-from django.core.serializers.json import DjangoJSONEncoder
 from django.db import migrations, models
 
 from ..fields import (
-    ArrayField, BigIntegerRangeField, CITextField, DateRangeField,
-    DateTimeRangeField, FloatRangeField, HStoreField, IntegerRangeField,
-    JSONField, SearchVectorField,
+    ArrayField, BigIntegerRangeField, CICharField, CIEmailField, CITextField,
+    DateRangeField, DateTimeRangeField, DecimalRangeField, EnumField,
+    HStoreField, IntegerRangeField, SearchVectorField,
 )
 from ..models import TagField
 
@@ -45,6 +44,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('field', HStoreField(blank=True, null=True)),
+                ('array_field', ArrayField(HStoreField(), null=True)),
             ],
             options={
                 'required_db_vendor': 'postgresql',
@@ -55,10 +55,13 @@ class Migration(migrations.Migration):
             name='OtherTypesArrayModel',
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
-                ('ips', ArrayField(models.GenericIPAddressField(), size=None)),
-                ('uuids', ArrayField(models.UUIDField(), size=None)),
-                ('decimals', ArrayField(models.DecimalField(max_digits=5, decimal_places=2), size=None)),
+                ('ips', ArrayField(models.GenericIPAddressField(), size=None, default=list)),
+                ('uuids', ArrayField(models.UUIDField(), size=None, default=list)),
+                ('decimals', ArrayField(models.DecimalField(max_digits=5, decimal_places=2), size=None, default=list)),
                 ('tags', ArrayField(TagField(), blank=True, null=True, size=None)),
+                ('json', ArrayField(models.JSONField(default={}), default=[])),
+                ('int_ranges', ArrayField(IntegerRangeField(), null=True, blank=True)),
+                ('bigint_ranges', ArrayField(BigIntegerRangeField(), null=True, blank=True)),
             ],
             options={
                 'required_db_vendor': 'postgresql',
@@ -92,6 +95,10 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('field', ArrayField(models.IntegerField(), size=None, null=True, blank=True)),
+                (
+                    'field_nested',
+                    ArrayField(ArrayField(models.IntegerField(), size=None, null=True), size=None, null=True),
+                ),
             ],
             options={
                 'required_db_vendor': 'postgresql',
@@ -117,6 +124,20 @@ class Migration(migrations.Migration):
             bases=None,
         ),
         migrations.CreateModel(
+            name='SmallAutoFieldModel',
+            fields=[
+                ('id', models.SmallAutoField(verbose_name='ID', serialize=False, primary_key=True)),
+            ],
+            options=None,
+        ),
+        migrations.CreateModel(
+            name='BigAutoFieldModel',
+            fields=[
+                ('id', models.BigAutoField(verbose_name='ID', serialize=False, primary_key=True)),
+            ],
+            options=None,
+        ),
+        migrations.CreateModel(
             name='Scene',
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
@@ -136,9 +157,12 @@ class Migration(migrations.Migration):
             bases=None,
         ),
         migrations.CreateModel(
-            name='CITextTestModel',
+            name='CITestModel',
             fields=[
-                ('name', CITextField(primary_key=True, max_length=255)),
+                ('name', CICharField(primary_key=True, max_length=255)),
+                ('email', CIEmailField()),
+                ('description', CITextField()),
+                ('array_field', ArrayField(CITextField(), null=True)),
             ],
             options={
                 'required_db_vendor': 'postgresql',
@@ -161,13 +185,28 @@ class Migration(migrations.Migration):
             bases=None,
         ),
         migrations.CreateModel(
+            name='LineSavedSearch',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('line', models.ForeignKey('postgres_tests.Line', on_delete=models.CASCADE)),
+                ('query', models.CharField(max_length=100)),
+            ],
+            options={
+                'required_db_vendor': 'postgresql',
+            },
+        ),
+        migrations.CreateModel(
             name='AggregateTestModel',
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
-                ('boolean_field', models.NullBooleanField()),
+                ('boolean_field', models.BooleanField(null=True)),
                 ('char_field', models.CharField(max_length=30, blank=True)),
                 ('integer_field', models.IntegerField(null=True)),
-            ]
+                ('json_field', models.JSONField(null=True)),
+            ],
+            options={
+                'required_db_vendor': 'postgresql',
+            },
         ),
         migrations.CreateModel(
             name='StatTestModel',
@@ -180,7 +219,10 @@ class Migration(migrations.Migration):
                     models.SET_NULL,
                     null=True,
                 )),
-            ]
+            ],
+            options={
+                'required_db_vendor': 'postgresql',
+            },
         ),
         migrations.CreateModel(
             name='NowTestModel',
@@ -190,14 +232,23 @@ class Migration(migrations.Migration):
             ]
         ),
         migrations.CreateModel(
+            name='UUIDTestModel',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('uuid', models.UUIDField(default=None, null=True)),
+            ]
+        ),
+        migrations.CreateModel(
             name='RangesModel',
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('ints', IntegerRangeField(null=True, blank=True)),
                 ('bigints', BigIntegerRangeField(null=True, blank=True)),
-                ('floats', FloatRangeField(null=True, blank=True)),
+                ('decimals', DecimalRangeField(null=True, blank=True)),
                 ('timestamps', DateTimeRangeField(null=True, blank=True)),
+                ('timestamps_inner', DateTimeRangeField(null=True, blank=True)),
                 ('dates', DateRangeField(null=True, blank=True)),
+                ('dates_inner', DateRangeField(null=True, blank=True)),
             ],
             options={
                 'required_db_vendor': 'postgresql'
@@ -217,6 +268,8 @@ class Migration(migrations.Migration):
                 ('float', models.FloatField(blank=True, null=True)),
                 ('timestamp', models.DateTimeField(blank=True, null=True)),
                 ('date', models.DateField(blank=True, null=True)),
+                ('small_integer', models.SmallIntegerField(blank=True, null=True)),
+                ('decimal_field', models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)),
             ],
             options={
                 'required_db_vendor': 'postgresql',
@@ -224,15 +277,36 @@ class Migration(migrations.Migration):
             bases=(models.Model,),
         ),
         migrations.CreateModel(
-            name='JSONModel',
+            name='ArrayEnumModel',
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
-                ('field', JSONField(null=True, blank=True)),
-                ('field_custom', JSONField(null=True, blank=True, encoder=DjangoJSONEncoder)),
+                ('array_of_enums', ArrayField(EnumField(max_length=20), null=True, blank=True)),
             ],
             options={
-                'required_db_features': {'has_jsonb_datatype'},
+                'required_db_vendor': 'postgresql',
             },
             bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='Room',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('number', models.IntegerField(unique=True)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='HotelReservation',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('room', models.ForeignKey('postgres_tests.Room', models.CASCADE)),
+                ('datespan', DateRangeField()),
+                ('start', models.DateTimeField()),
+                ('end', models.DateTimeField()),
+                ('cancelled', models.BooleanField(default=False)),
+                ('requirements', models.JSONField(blank=True, null=True)),
+            ],
+            options={
+                'required_db_vendor': 'postgresql',
+            },
         ),
     ]

@@ -108,13 +108,13 @@ class Team:
         raise NotImplementedError("Not so simple")
 
     def to_string(self):
-        return "%s" % self.title
+        return str(self.title)
 
 
 class TeamField(models.CharField):
 
     def __init__(self):
-        super(TeamField, self).__init__(max_length=100)
+        super().__init__(max_length=100)
 
     def get_db_prep_save(self, value, connection):
         return str(value.title)
@@ -124,14 +124,14 @@ class TeamField(models.CharField):
             return value
         return Team(value)
 
-    def from_db_value(self, value, expression, connection, context):
+    def from_db_value(self, value, expression, connection):
         return Team(value)
 
     def value_to_string(self, obj):
         return self.value_from_object(obj).to_string()
 
     def deconstruct(self):
-        name, path, args, kwargs = super(TeamField, self).deconstruct()
+        name, path, args, kwargs = super().deconstruct()
         del kwargs['max_length']
         return name, path, args, kwargs
 

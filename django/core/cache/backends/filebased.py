@@ -1,5 +1,4 @@
 "File-based cache backend"
-import errno
 import glob
 import hashlib
 import os
@@ -10,15 +9,16 @@ import time
 import zlib
 
 from django.core.cache.backends.base import DEFAULT_TIMEOUT, BaseCache
+from django.core.files import locks
 from django.core.files.move import file_move_safe
-from django.utils.encoding import force_bytes
 
 
 class FileBasedCache(BaseCache):
     cache_suffix = '.djcache'
+    pickle_protocol = pickle.HIGHEST_PROTOCOL
 
     def __init__(self, dir, params):
-        super(FileBasedCache, self).__init__(params)
+        super().__init__(params)
         self._dir = os.path.abspath(dir)
         self._createdir()
 
@@ -34,10 +34,14 @@ class FileBasedCache(BaseCache):
             with open(fname, 'rb') as f:
                 if not self._is_expired(f):
                     return pickle.loads(zlib.decompress(f.read()))
-        except IOError as e:
-            if e.errno != errno.ENOENT:
-                raise
+        except FileNotFoundError:
+            pass
         return default
+
+    def _write_content(self, file, timeout, value):
+        expiry = self.get_backend_timeout(timeout)
+        file.write(pickle.dumps(expiry, self.pickle_protocol))
+        file.write(zlib.compress(pickle.dumps(value, self.pickle_protocol)))
 
     def set(self, key, value, timeout=DEFAULT_TIMEOUT, version=None):
         self._createdir()  # Cache dir can be deleted at any time.
@@ -47,28 +51,42 @@ class FileBasedCache(BaseCache):
         renamed = False
         try:
             with open(fd, 'wb') as f:
-                expiry = self.get_backend_timeout(timeout)
-                f.write(pickle.dumps(expiry, pickle.HIGHEST_PROTOCOL))
-                f.write(zlib.compress(pickle.dumps(value, pickle.HIGHEST_PROTOCOL)))
+                self._write_content(f, timeout, value)
             file_move_safe(tmp_path, fname, allow_overwrite=True)
             renamed = True
         finally:
             if not renamed:
                 os.remove(tmp_path)
 
+    def touch(self, key, timeout=DEFAULT_TIMEOUT, version=None):
+        try:
+            with open(self._key_to_file(key, version), 'r+b') as f:
+                try:
+                    locks.lock(f, locks.LOCK_EX)
+                    if self._is_expired(f):
+                        return False
+                    else:
+                        previous_value = pickle.loads(zlib.decompress(f.read()))
+                        f.seek(0)
+                        self._write_content(f, timeout, previous_value)
+                        return True
+                finally:
+                    locks.unlock(f)
+        except FileNotFoundError:
+            return False
+
     def delete(self, key, version=None):
-        self._delete(self._key_to_file(key, version))
+        return self._delete(self._key_to_file(key, version))
 
     def _delete(self, fname):
         if not fname.startswith(self._dir) or not os.path.exists(fname):
-            return
+            return False
         try:
             os.remove(fname)
-        except OSError as e:
-            # ENOENT can happen if the cache file is removed (by another
-            # process) after the os.path.exists check.
-            if e.errno != errno.ENOENT:
-                raise
+        except FileNotFoundError:
+            # The file may have been removed by another process.
+            return False
+        return True
 
     def has_key(self, key, version=None):
         fname = self._key_to_file(key, version)
@@ -79,7 +97,7 @@ class FileBasedCache(BaseCache):
 
     def _cull(self):
         """
-        Removes random cache entries if max_entries is reached at a ratio
+        Remove random cache entries if max_entries is reached at a ratio
         of num_entries / cull_frequency. A value of 0 for CULL_FREQUENCY means
         that the entire cache will be purged.
         """
@@ -96,14 +114,13 @@ class FileBasedCache(BaseCache):
             self._delete(fname)
 
     def _createdir(self):
-        if not os.path.exists(self._dir):
-            try:
-                os.makedirs(self._dir, 0o700)
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise EnvironmentError(
-                        "Cache directory '%s' does not exist "
-                        "and could not be created'" % self._dir)
+        # Set the umask because os.makedirs() doesn't apply the "mode" argument
+        # to intermediate-level directories.
+        old_umask = os.umask(0o077)
+        try:
+            os.makedirs(self._dir, 0o700, exist_ok=True)
+        finally:
+            os.umask(old_umask)
 
     def _key_to_file(self, key, version=None):
         """
@@ -113,23 +130,23 @@ class FileBasedCache(BaseCache):
         key = self.make_key(key, version=version)
         self.validate_key(key)
         return os.path.join(self._dir, ''.join(
-            [hashlib.md5(force_bytes(key)).hexdigest(), self.cache_suffix]))
+            [hashlib.md5(key.encode()).hexdigest(), self.cache_suffix]))
 
     def clear(self):
         """
         Remove all the cache files.
         """
-        if not os.path.exists(self._dir):
-            return
         for fname in self._list_cache_files():
             self._delete(fname)
 
     def _is_expired(self, f):
         """
-        Takes an open cache file and determines if it has expired,
-        deletes the file if it is has passed its expiry time.
+        Take an open cache file `f` and delete it if it's expired.
         """
-        exp = pickle.load(f)
+        try:
+            exp = pickle.load(f)
+        except EOFError:
+            exp = 0  # An empty file is considered expired.
         if exp is not None and exp < time.time():
             f.close()  # On Windows a file has to be closed before deleting
             self._delete(f.name)
@@ -141,8 +158,7 @@ class FileBasedCache(BaseCache):
         Get a list of paths to all the cache files. These are all the files
         in the root cache dir that end on the cache_suffix.
         """
-        if not os.path.exists(self._dir):
-            return []
-        filelist = [os.path.join(self._dir, fname) for fname
-                    in glob.glob1(self._dir, '*%s' % self.cache_suffix)]
-        return filelist
+        return [
+            os.path.join(self._dir, fname)
+            for fname in glob.glob1(self._dir, '*%s' % self.cache_suffix)
+        ]

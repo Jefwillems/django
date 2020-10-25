@@ -1,4 +1,3 @@
-import errno
 import os
 from datetime import datetime
 from urllib.parse import urljoin
@@ -12,12 +11,15 @@ from django.utils import timezone
 from django.utils._os import safe_join
 from django.utils.crypto import get_random_string
 from django.utils.deconstruct import deconstructible
-from django.utils.encoding import filepath_to_uri, force_text
+from django.utils.encoding import filepath_to_uri
 from django.utils.functional import LazyObject, cached_property
 from django.utils.module_loading import import_string
 from django.utils.text import get_valid_filename
 
-__all__ = ('Storage', 'FileSystemStorage', 'DefaultStorage', 'default_storage')
+__all__ = (
+    'Storage', 'FileSystemStorage', 'DefaultStorage', 'default_storage',
+    'get_storage_class',
+)
 
 
 class Storage:
@@ -30,15 +32,13 @@ class Storage:
     # These shouldn't be overridden by subclasses unless absolutely necessary.
 
     def open(self, name, mode='rb'):
-        """
-        Retrieves the specified file from storage.
-        """
+        """Retrieve the specified file from storage."""
         return self._open(name, mode)
 
     def save(self, name, content, max_length=None):
         """
-        Saves new content to the file specified by name. The content should be
-        a proper File object or any python file-like object, ready to be read
+        Save new content to the file specified by name. The content should be
+        a proper File object or any Python file-like object, ready to be read
         from the beginning.
         """
         # Get the proper name for the file, as it will actually be saved.
@@ -55,26 +55,33 @@ class Storage:
 
     def get_valid_name(self, name):
         """
-        Returns a filename, based on the provided filename, that's suitable for
+        Return a filename, based on the provided filename, that's suitable for
         use in the target storage system.
         """
         return get_valid_filename(name)
 
+    def get_alternative_name(self, file_root, file_ext):
+        """
+        Return an alternative filename, by adding an underscore and a random 7
+        character alphanumeric string (before the file extension, if one
+        exists) to the filename.
+        """
+        return '%s_%s%s' % (file_root, get_random_string(7), file_ext)
+
     def get_available_name(self, name, max_length=None):
         """
-        Returns a filename that's free on the target storage system, and
+        Return a filename that's free on the target storage system and
         available for new content to be written to.
         """
         dir_name, file_name = os.path.split(name)
         file_root, file_ext = os.path.splitext(file_name)
-        # If the filename already exists, add an underscore and a random 7
-        # character alphanumeric string (before the file extension, if one
-        # exists) to the filename until the generated filename doesn't exist.
+        # If the filename already exists, generate an alternative filename
+        # until it doesn't exist.
         # Truncate original name if required, so the new filename does not
         # exceed the max_length.
         while self.exists(name) or (max_length and len(name) > max_length):
             # file_ext includes the dot.
-            name = os.path.join(dir_name, "%s_%s%s" % (file_root, get_random_string(7), file_ext))
+            name = os.path.join(dir_name, self.get_alternative_name(file_root, file_ext))
             if max_length is None:
                 continue
             # Truncate file_root if max_length exceeded.
@@ -88,7 +95,7 @@ class Storage:
                         'Please make sure that the corresponding file field '
                         'allows sufficient "max_length".' % name
                     )
-                name = os.path.join(dir_name, "%s_%s%s" % (file_root, get_random_string(7), file_ext))
+                name = os.path.join(dir_name, self.get_alternative_name(file_root, file_ext))
         return name
 
     def generate_filename(self, filename):
@@ -102,7 +109,7 @@ class Storage:
 
     def path(self, name):
         """
-        Returns a local filesystem path where the file can be retrieved using
+        Return a local filesystem path where the file can be retrieved using
         Python's built-in open() function. Storage systems that can't be
         accessed using open() should *not* implement this method.
         """
@@ -113,33 +120,33 @@ class Storage:
 
     def delete(self, name):
         """
-        Deletes the specified file from the storage system.
+        Delete the specified file from the storage system.
         """
         raise NotImplementedError('subclasses of Storage must provide a delete() method')
 
     def exists(self, name):
         """
-        Returns True if a file referenced by the given name already exists in the
+        Return True if a file referenced by the given name already exists in the
         storage system, or False if the name is available for a new file.
         """
         raise NotImplementedError('subclasses of Storage must provide an exists() method')
 
     def listdir(self, path):
         """
-        Lists the contents of the specified path, returning a 2-tuple of lists;
+        List the contents of the specified path. Return a 2-tuple of lists:
         the first item being directories, the second item being files.
         """
         raise NotImplementedError('subclasses of Storage must provide a listdir() method')
 
     def size(self, name):
         """
-        Returns the total size, in bytes, of the file specified by name.
+        Return the total size, in bytes, of the file specified by name.
         """
         raise NotImplementedError('subclasses of Storage must provide a size() method')
 
     def url(self, name):
         """
-        Returns an absolute URL where the file's contents can be accessed
+        Return an absolute URL where the file's contents can be accessed
         directly by a Web browser.
         """
         raise NotImplementedError('subclasses of Storage must provide a url() method')
@@ -171,6 +178,9 @@ class FileSystemStorage(Storage):
     """
     Standard filesystem storage
     """
+    # The combination of O_CREAT and O_EXCL makes os.open() raise OSError if
+    # the file already exists before it's opened.
+    OS_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0)
 
     def __init__(self, location=None, base_url=None, file_permissions_mode=None,
                  directory_permissions_mode=None):
@@ -224,27 +234,20 @@ class FileSystemStorage(Storage):
         full_path = self.path(name)
 
         # Create any intermediate directories that do not exist.
-        # Note that there is a race between os.path.exists and os.makedirs:
-        # if os.makedirs fails with EEXIST, the directory was created
-        # concurrently, and we can continue normally. Refs #16082.
         directory = os.path.dirname(full_path)
-        if not os.path.exists(directory):
-            try:
-                if self.directory_permissions_mode is not None:
-                    # os.makedirs applies the global umask, so we reset it,
-                    # for consistency with file_permissions_mode behavior.
-                    old_umask = os.umask(0)
-                    try:
-                        os.makedirs(directory, self.directory_permissions_mode)
-                    finally:
-                        os.umask(old_umask)
-                else:
-                    os.makedirs(directory)
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise
-        if not os.path.isdir(directory):
-            raise IOError("%s exists and is not a directory." % directory)
+        try:
+            if self.directory_permissions_mode is not None:
+                # Set the umask because os.makedirs() doesn't apply the "mode"
+                # argument to intermediate-level directories.
+                old_umask = os.umask(0o777 & ~self.directory_permissions_mode)
+                try:
+                    os.makedirs(directory, self.directory_permissions_mode, exist_ok=True)
+                finally:
+                    os.umask(old_umask)
+            else:
+                os.makedirs(directory, exist_ok=True)
+        except FileExistsError:
+            raise FileExistsError('%s exists and is not a directory.' % directory)
 
         # There's a potential race condition between get_available_name and
         # saving the file; it's possible that two threads might return the
@@ -260,12 +263,8 @@ class FileSystemStorage(Storage):
 
                 # This is a normal uploadedfile that we can stream.
                 else:
-                    # This fun binary flag incantation makes os.open throw an
-                    # OSError if the file already exists before we open it.
-                    flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                             getattr(os, 'O_BINARY', 0))
                     # The current umask value is masked out by os.open!
-                    fd = os.open(full_path, flags, 0o666)
+                    fd = os.open(full_path, self.OS_OPEN_FLAGS, 0o666)
                     _file = None
                     try:
                         locks.lock(fd, locks.LOCK_EX)
@@ -280,13 +279,10 @@ class FileSystemStorage(Storage):
                             _file.close()
                         else:
                             os.close(fd)
-            except OSError as e:
-                if e.errno == errno.EEXIST:
-                    # Ooops, the file exists. We need a new file name.
-                    name = self.get_available_name(name)
-                    full_path = self.path(name)
-                else:
-                    raise
+            except FileExistsError:
+                # A new name is needed if the file exists.
+                name = self.get_available_name(name)
+                full_path = self.path(name)
             else:
                 # OK, the file save worked. Break out of the loop.
                 break
@@ -295,19 +291,21 @@ class FileSystemStorage(Storage):
             os.chmod(full_path, self.file_permissions_mode)
 
         # Store filenames with forward slashes, even on Windows.
-        return force_text(name.replace('\\', '/'))
+        return str(name).replace('\\', '/')
 
     def delete(self, name):
         assert name, "The name argument is not allowed to be empty."
         name = self.path(name)
-        # If the file exists, delete it from the filesystem.
-        # If os.remove() fails with ENOENT, the file may have been removed
-        # concurrently, and it's safe to continue normally.
+        # If the file or directory exists, delete it from the filesystem.
         try:
-            os.remove(name)
-        except OSError as e:
-            if e.errno != errno.ENOENT:
-                raise
+            if os.path.isdir(name):
+                os.rmdir(name)
+            else:
+                os.remove(name)
+        except FileNotFoundError:
+            # FileNotFoundError is raised if the file or directory was removed
+            # concurrently.
+            pass
 
     def exists(self, name):
         return os.path.exists(self.path(name))
@@ -315,11 +313,11 @@ class FileSystemStorage(Storage):
     def listdir(self, path):
         path = self.path(path)
         directories, files = [], []
-        for entry in os.listdir(path):
-            if os.path.isdir(os.path.join(path, entry)):
-                directories.append(entry)
+        for entry in os.scandir(path):
+            if entry.is_dir():
+                directories.append(entry.name)
             else:
-                files.append(entry)
+                files.append(entry.name)
         return directories, files
 
     def path(self, name):

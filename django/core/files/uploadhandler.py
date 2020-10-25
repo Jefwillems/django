@@ -1,7 +1,7 @@
 """
 Base file upload handler classes, and the built-in concrete subclasses
 """
-
+import os
 from io import BytesIO
 
 from django.conf import settings
@@ -52,7 +52,7 @@ class SkipFile(UploadFileException):
 
 class StopFutureHandlers(UploadFileException):
     """
-    Upload handers that have handled a file and do not want future handlers to
+    Upload handlers that have handled a file and do not want future handlers to
     run should raise this exception instead of returning None.
     """
     pass
@@ -127,19 +127,23 @@ class FileUploadHandler:
         """
         pass
 
+    def upload_interrupted(self):
+        """
+        Signal that the upload was interrupted. Subclasses should perform
+        cleanup that is necessary for this handler.
+        """
+        pass
+
 
 class TemporaryFileUploadHandler(FileUploadHandler):
     """
     Upload handler that streams data into a temporary file.
     """
-    def __init__(self, *args, **kwargs):
-        super(TemporaryFileUploadHandler, self).__init__(*args, **kwargs)
-
     def new_file(self, *args, **kwargs):
         """
         Create the file object to append to as data is coming in.
         """
-        super(TemporaryFileUploadHandler, self).new_file(*args, **kwargs)
+        super().new_file(*args, **kwargs)
         self.file = TemporaryUploadedFile(self.file_name, self.content_type, 0, self.charset, self.content_type_extra)
 
     def receive_data_chunk(self, raw_data, start):
@@ -150,6 +154,15 @@ class TemporaryFileUploadHandler(FileUploadHandler):
         self.file.size = file_size
         return self.file
 
+    def upload_interrupted(self):
+        if hasattr(self, 'file'):
+            temp_location = self.file.temporary_file_path()
+            try:
+                self.file.close()
+                os.remove(temp_location)
+            except FileNotFoundError:
+                pass
+
 
 class MemoryFileUploadHandler(FileUploadHandler):
     """
@@ -158,34 +171,28 @@ class MemoryFileUploadHandler(FileUploadHandler):
 
     def handle_raw_input(self, input_data, META, content_length, boundary, encoding=None):
         """
-        Use the content_length to signal whether or not this handler should be in use.
+        Use the content_length to signal whether or not this handler should be
+        used.
         """
         # Check the content-length header to see if we should
         # If the post is too large, we cannot use the Memory handler.
-        if content_length > settings.FILE_UPLOAD_MAX_MEMORY_SIZE:
-            self.activated = False
-        else:
-            self.activated = True
+        self.activated = content_length <= settings.FILE_UPLOAD_MAX_MEMORY_SIZE
 
     def new_file(self, *args, **kwargs):
-        super(MemoryFileUploadHandler, self).new_file(*args, **kwargs)
+        super().new_file(*args, **kwargs)
         if self.activated:
             self.file = BytesIO()
             raise StopFutureHandlers()
 
     def receive_data_chunk(self, raw_data, start):
-        """
-        Add the data to the BytesIO file.
-        """
+        """Add the data to the BytesIO file."""
         if self.activated:
             self.file.write(raw_data)
         else:
             return raw_data
 
     def file_complete(self, file_size):
-        """
-        Return a file object if we're activated.
-        """
+        """Return a file object if this handler is activated."""
         if not self.activated:
             return
 

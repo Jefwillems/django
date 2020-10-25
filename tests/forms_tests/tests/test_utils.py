@@ -3,9 +3,8 @@ import copy
 from django.core.exceptions import ValidationError
 from django.forms.utils import ErrorDict, ErrorList, flatatt
 from django.test import SimpleTestCase
-from django.utils.encoding import force_text
 from django.utils.safestring import mark_safe
-from django.utils.translation import ugettext_lazy
+from django.utils.translation import gettext_lazy
 
 
 class FormsUtilsTestCase(SimpleTestCase):
@@ -60,14 +59,14 @@ class FormsUtilsTestCase(SimpleTestCase):
             str(ErrorList(ValidationError("There was an error.").messages)),
             '<ul class="errorlist"><li>There was an error.</li></ul>'
         )
-        # Can take a unicode string.
+        # Can take a Unicode string.
         self.assertHTMLEqual(
             str(ErrorList(ValidationError("Not \u03C0.").messages)),
             '<ul class="errorlist"><li>Not π.</li></ul>'
         )
         # Can take a lazy string.
         self.assertHTMLEqual(
-            str(ErrorList(ValidationError(ugettext_lazy("Error.")).messages)),
+            str(ErrorList(ValidationError(gettext_lazy("Error.")).messages)),
             '<ul class="errorlist"><li>Error.</li></ul>'
         )
         # Can take a list.
@@ -85,7 +84,7 @@ class FormsUtilsTestCase(SimpleTestCase):
             str(ErrorList(sorted(ValidationError([
                 "1. First error.",
                 "2. Not \u03C0.",
-                ugettext_lazy("3. Error."),
+                gettext_lazy("3. Error."),
                 {
                     'error_1': "4. First dict error.",
                     'error_2': "5. Second dict error.",
@@ -152,15 +151,14 @@ class FormsUtilsTestCase(SimpleTestCase):
 
         e_deepcopy = copy.deepcopy(e)
         self.assertEqual(e, e_deepcopy)
-        self.assertEqual(e.as_data(), e_copy.as_data())
 
     def test_error_dict_html_safe(self):
         e = ErrorDict()
         e['username'] = 'Invalid username.'
         self.assertTrue(hasattr(ErrorDict, '__html__'))
-        self.assertEqual(force_text(e), e.__html__())
+        self.assertEqual(str(e), e.__html__())
 
     def test_error_list_html_safe(self):
         e = ErrorList(['Invalid username.'])
         self.assertTrue(hasattr(ErrorList, '__html__'))
-        self.assertEqual(force_text(e), e.__html__())
+        self.assertEqual(str(e), e.__html__())

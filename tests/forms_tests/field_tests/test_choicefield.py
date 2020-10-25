@@ -1,5 +1,7 @@
-from django.forms import ChoiceField, Form, ValidationError
-from django.test import SimpleTestCase, ignore_warnings
+from django.core.exceptions import ValidationError
+from django.db import models
+from django.forms import ChoiceField, Form
+from django.test import SimpleTestCase
 
 from . import FormFieldAssertionsMixin
 
@@ -52,6 +54,10 @@ class ChoiceFieldTest(FormFieldAssertionsMixin, SimpleTestCase):
         with self.assertRaisesMessage(ValidationError, msg):
             f.clean('6')
 
+    def test_choicefield_choices_default(self):
+        f = ChoiceField()
+        self.assertEqual(f.choices, [])
+
     def test_choicefield_callable(self):
         def choices():
             return [('J', 'John'), ('P', 'Paul')]
@@ -83,15 +89,13 @@ class ChoiceFieldTest(FormFieldAssertionsMixin, SimpleTestCase):
             '<option value="P">Paul</option></select>'
         )
 
-    @ignore_warnings(category=UnicodeWarning)
-    def test_utf8_bytesrings(self):
-        # Choice validation with UTF-8 bytestrings as input (these are the
-        # Russian abbreviations "мес." and "шт.".
-        f = ChoiceField(
-            choices=(
-                (b'\xd0\xbc\xd0\xb5\xd1\x81.', b'\xd0\xbc\xd0\xb5\xd1\x81.'),
-                (b'\xd1\x88\xd1\x82.', b'\xd1\x88\xd1\x82.'),
-            ),
-        )
-        self.assertEqual(f.clean('\u0448\u0442.'), '\u0448\u0442.')
-        self.assertEqual(f.clean(b'\xd1\x88\xd1\x82.'), '\u0448\u0442.')
+    def test_choicefield_enumeration(self):
+        class FirstNames(models.TextChoices):
+            JOHN = 'J', 'John'
+            PAUL = 'P', 'Paul'
+
+        f = ChoiceField(choices=FirstNames.choices)
+        self.assertEqual(f.clean('J'), 'J')
+        msg = "'Select a valid choice. 3 is not one of the available choices.'"
+        with self.assertRaisesMessage(ValidationError, msg):
+            f.clean('3')

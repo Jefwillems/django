@@ -1,8 +1,14 @@
 import sys
 import traceback
 from io import BytesIO
-from unittest import TestCase
+from unittest import TestCase, mock
 from wsgiref import simple_server
+
+from django.core.servers.basehttp import get_internal_wsgi_application
+from django.core.signals import request_finished
+from django.test import RequestFactory, override_settings
+
+from .views import FILE_RESPONSE_HOLDER
 
 # If data is too large, socket will choke, so write chunks no larger than 32MB
 # at a time. The rationale behind the 32MB can be found in #5596#comment:4.
@@ -34,7 +40,7 @@ class ServerHandler(simple_server.ServerHandler):
             self._flush()
 
     def error_output(self, environ, start_response):
-        super(ServerHandler, self).error_output(environ, start_response)
+        super().error_output(environ, start_response)
         return ['\n'.join(traceback.format_exception(*sys.exc_info()))]
 
 
@@ -45,7 +51,7 @@ class DummyHandler:
 
 class FileWrapperHandler(ServerHandler):
     def __init__(self, *args, **kwargs):
-        super(FileWrapperHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.request_handler = DummyHandler()
         self._used_sendfile = False
 
@@ -66,7 +72,7 @@ def wsgi_app_file_wrapper(environ, start_response):
 
 class WSGIFileWrapperTests(TestCase):
     """
-    The wsgi.file_wrapper works for the builting server.
+    The wsgi.file_wrapper works for the builtin server.
 
     Tests for #9659: wsgi.file_wrapper in the builtin server.
     We need to mock a couple of handlers and keep track of what
@@ -89,6 +95,36 @@ class WSGIFileWrapperTests(TestCase):
         self.assertEqual(handler.stdout.getvalue().splitlines()[-1], b'Hello World!')
         self.assertEqual(handler.stderr.getvalue(), b'')
 
+    @override_settings(ROOT_URLCONF='builtin_server.urls')
+    def test_file_response_closing(self):
+        """
+        View returning a FileResponse properly closes the file and http
+        response when file_wrapper is used.
+        """
+        env = RequestFactory().get('/fileresponse/').environ
+        handler = FileWrapperHandler(None, BytesIO(), BytesIO(), env)
+        handler.run(get_internal_wsgi_application())
+        # Sendfile is used only when file_wrapper has been used.
+        self.assertTrue(handler._used_sendfile)
+        # Fetch the original response object.
+        self.assertIn('response', FILE_RESPONSE_HOLDER)
+        response = FILE_RESPONSE_HOLDER['response']
+        # The response and file buffers are closed.
+        self.assertIs(response.closed, True)
+        buf1, buf2 = FILE_RESPONSE_HOLDER['buffers']
+        self.assertIs(buf1.closed, True)
+        self.assertIs(buf2.closed, True)
+        FILE_RESPONSE_HOLDER.clear()
+
+    @override_settings(ROOT_URLCONF='builtin_server.urls')
+    def test_file_response_call_request_finished(self):
+        env = RequestFactory().get('/fileresponse/').environ
+        handler = FileWrapperHandler(None, BytesIO(), BytesIO(), env)
+        with mock.MagicMock() as signal_handler:
+            request_finished.connect(signal_handler)
+            handler.run(get_internal_wsgi_application())
+            self.assertEqual(signal_handler.call_count, 1)
+
 
 class WriteChunkCounterHandler(ServerHandler):
     """
@@ -97,13 +133,13 @@ class WriteChunkCounterHandler(ServerHandler):
     """
 
     def __init__(self, *args, **kwargs):
-        super(WriteChunkCounterHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.request_handler = DummyHandler()
         self.headers_written = False
         self.write_chunk_counter = 0
 
     def send_headers(self):
-        super(WriteChunkCounterHandler, self).send_headers()
+        super().send_headers()
         self.headers_written = True
 
     def _write(self, data):

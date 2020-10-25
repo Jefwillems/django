@@ -202,9 +202,9 @@ class MeasureBase:
     @classmethod
     def unit_attname(cls, unit_str):
         """
-        Retrieves the unit attribute name for the given unit string.
-        For example, if the given unit string is 'metre', 'm' would be returned.
-        An exception is raised if an attribute cannot be found.
+        Retrieve the unit attribute name for the given unit string.
+        For example, if the given unit string is 'metre', return 'm'.
+        Raise an exception if an attribute cannot be found.
         """
         lower = unit_str.lower()
         if unit_str in cls.UNITS:
@@ -233,6 +233,7 @@ class Distance(MeasureBase):
         'clarke_link': 0.201166195164,
         'fathom': 1.8288,
         'ft': 0.3048,
+        'furlong': 201.168,
         'german_m': 1.0000135965,
         'gold_coast_ft': 0.304799710181508,
         'indian_yd': 0.914398530744,
@@ -280,6 +281,7 @@ class Distance(MeasureBase):
         'Chain (Benoit)': 'chain_benoit',
         'Chain (Sears)': 'chain_sears',
         'Foot (International)': 'ft',
+        'Furrow Long': 'furlong',
         'German legal metre': 'german_m',
         'Gold Coast foot': 'gold_coast_ft',
         'Indian yard': 'indian_yd',

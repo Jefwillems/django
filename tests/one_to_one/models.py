@@ -29,9 +29,6 @@ class Bar(models.Model):
     place = models.OneToOneField(Place, models.CASCADE)
     serves_cocktails = models.BooleanField(default=True)
 
-    def __str__(self):
-        return "%s the bar" % self.place.name
-
 
 class UndergroundBar(models.Model):
     place = models.OneToOneField(Place, models.SET_NULL, null=True)
@@ -49,9 +46,6 @@ class Waiter(models.Model):
 class Favorites(models.Model):
     name = models.CharField(max_length=50)
     restaurants = models.ManyToManyField(Restaurant)
-
-    def __str__(self):
-        return "Favorites for %s" % self.name
 
 
 class ManualPrimaryKey(models.Model):
@@ -96,7 +90,7 @@ class ToFieldPointer(models.Model):
 # Test related objects visibility.
 class SchoolManager(models.Manager):
     def get_queryset(self):
-        return super(SchoolManager, self).get_queryset().filter(is_public=True)
+        return super().get_queryset().filter(is_public=True)
 
 
 class School(models.Model):
@@ -106,7 +100,7 @@ class School(models.Model):
 
 class DirectorManager(models.Manager):
     def get_queryset(self):
-        return super(DirectorManager, self).get_queryset().filter(is_temp=False)
+        return super().get_queryset().filter(is_temp=False)
 
 
 class Director(models.Model):

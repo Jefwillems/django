@@ -1,7 +1,8 @@
 from unittest import skipIf
 
+from django import forms
 from django.db import connection, models
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from .models import Post
 
@@ -18,6 +19,11 @@ class TextFieldTests(TestCase):
         self.assertIsNone(tf1.formfield().max_length)
         self.assertEqual(2345, tf2.formfield().max_length)
 
+    def test_choices_generates_select_widget(self):
+        """A TextField with choices uses a Select widget."""
+        f = models.TextField(choices=[('A', 'A'), ('B', 'B')])
+        self.assertIsInstance(f.formfield().widget, forms.Select)
+
     def test_to_python(self):
         """TextField.to_python() should return a string."""
         f = models.TextField()
@@ -31,3 +37,13 @@ class TextFieldTests(TestCase):
         p = Post.objects.create(title='Whatever', body='Smile 😀.')
         p.refresh_from_db()
         self.assertEqual(p.body, 'Smile 😀.')
+
+
+class TestMethods(SimpleTestCase):
+    def test_deconstruct(self):
+        field = models.TextField()
+        *_, kwargs = field.deconstruct()
+        self.assertEqual(kwargs, {})
+        field = models.TextField(db_collation='utf8_esperanto_ci')
+        *_, kwargs = field.deconstruct()
+        self.assertEqual(kwargs, {'db_collation': 'utf8_esperanto_ci'})

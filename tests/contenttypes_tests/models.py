@@ -1,25 +1,20 @@
+from urllib.parse import quote
+
 from django.contrib.contenttypes.fields import (
     GenericForeignKey, GenericRelation,
 )
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.sites.models import SiteManager
 from django.db import models
-from django.utils.http import urlquote
 
 
 class Site(models.Model):
     domain = models.CharField(max_length=100)
     objects = SiteManager()
 
-    def __str__(self):
-        return self.domain
-
 
 class Author(models.Model):
     name = models.CharField(max_length=100)
-
-    def __str__(self):
-        return self.name
 
     def get_absolute_url(self):
         return '/authors/%s/' % self.id
@@ -31,15 +26,9 @@ class Article(models.Model):
     author = models.ForeignKey(Author, models.CASCADE)
     date_created = models.DateTimeField()
 
-    def __str__(self):
-        return self.title
-
 
 class SchemeIncludedURL(models.Model):
     url = models.URLField(max_length=100)
-
-    def __str__(self):
-        return self.url
 
     def get_absolute_url(self):
         return self.url
@@ -61,9 +50,6 @@ class FooWithoutUrl(models.Model):
     """
     name = models.CharField(max_length=30, unique=True)
 
-    def __str__(self):
-        return self.name
-
 
 class FooWithUrl(FooWithoutUrl):
     """
@@ -72,7 +58,7 @@ class FooWithUrl(FooWithoutUrl):
     """
 
     def get_absolute_url(self):
-        return "/users/%s/" % urlquote(self.name)
+        return "/users/%s/" % quote(self.name)
 
 
 class FooWithBrokenAbsoluteUrl(FooWithoutUrl):
@@ -98,9 +84,6 @@ class Answer(models.Model):
     class Meta:
         order_with_respect_to = 'question'
 
-    def __str__(self):
-        return self.text
-
 
 class Post(models.Model):
     """An ordered tag on an item."""
@@ -113,17 +96,19 @@ class Post(models.Model):
     class Meta:
         order_with_respect_to = 'parent'
 
-    def __str__(self):
-        return self.title
-
 
 class ModelWithNullFKToSite(models.Model):
     title = models.CharField(max_length=200)
     site = models.ForeignKey(Site, null=True, on_delete=models.CASCADE)
     post = models.ForeignKey(Post, null=True, on_delete=models.CASCADE)
 
-    def __str__(self):
-        return self.title
+    def get_absolute_url(self):
+        return '/title/%s/' % quote(self.title)
+
+
+class ModelWithM2MToSite(models.Model):
+    title = models.CharField(max_length=200)
+    sites = models.ManyToManyField(Site)
 
     def get_absolute_url(self):
-        return '/title/%s/' % urlquote(self.title)
+        return '/title/%s/' % quote(self.title)

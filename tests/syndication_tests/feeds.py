@@ -29,6 +29,9 @@ class TestRss2Feed(views.Feed):
     def item_updateddate(self, item):
         return item.updated
 
+    def item_comments(self, item):
+        return "%scomments" % item.get_absolute_url()
+
     item_author_name = 'Sally Smith'
     item_author_email = 'test@example.com'
     item_author_link = 'http://www.example.com/'
@@ -74,7 +77,7 @@ class TestLatestFeed(TestRss2Feed):
     subtitle = TestRss2Feed.description
 
     def items(self):
-        return Entry.objects.exclude(pk=5)
+        return Entry.objects.exclude(title='My last entry')
 
 
 class ArticlesFeed(TestRss2Feed):
@@ -131,9 +134,33 @@ class TemplateContextFeed(TestRss2Feed):
     description_template = 'syndication/description_context.html'
 
     def get_context_data(self, **kwargs):
-        context = super(TemplateContextFeed, self).get_context_data(**kwargs)
+        context = super().get_context_data(**kwargs)
         context['foo'] = 'bar'
         return context
+
+
+class TestLanguageFeed(TestRss2Feed):
+    language = 'de'
+
+
+class TestGetObjectFeed(TestRss2Feed):
+    def get_object(self, request, entry_id):
+        return Entry.objects.get(pk=entry_id)
+
+    def items(self, obj):
+        return Article.objects.filter(entry=obj)
+
+    def item_link(self, item):
+        return '%sarticle/%s/' % (item.entry.get_absolute_url(), item.pk)
+
+    def item_comments(self, item):
+        return '%scomments' % self.item_link(item)
+
+    def item_description(self, item):
+        return 'Article description: %s' % item.title
+
+    def item_title(self, item):
+        return 'Title: %s' % item.title
 
 
 class NaiveDatesFeed(TestAtomFeed):
@@ -164,21 +191,21 @@ class MyCustomAtom1Feed(feedgenerator.Atom1Feed):
     Test of a custom feed generator class.
     """
     def root_attributes(self):
-        attrs = super(MyCustomAtom1Feed, self).root_attributes()
+        attrs = super().root_attributes()
         attrs['django'] = 'rocks'
         return attrs
 
     def add_root_elements(self, handler):
-        super(MyCustomAtom1Feed, self).add_root_elements(handler)
+        super().add_root_elements(handler)
         handler.addQuickElement('spam', 'eggs')
 
     def item_attributes(self, item):
-        attrs = super(MyCustomAtom1Feed, self).item_attributes(item)
+        attrs = super().item_attributes(item)
         attrs['bacon'] = 'yum'
         return attrs
 
     def add_item_elements(self, handler, item):
-        super(MyCustomAtom1Feed, self).add_item_elements(handler, item)
+        super().add_item_elements(handler, item)
         handler.addQuickElement('ministry', 'silly walks')
 
 

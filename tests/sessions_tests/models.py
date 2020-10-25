@@ -29,7 +29,7 @@ class SessionStore(DBStore):
         return CustomSession
 
     def create_model_instance(self, data):
-        obj = super(SessionStore, self).create_model_instance(data)
+        obj = super().create_model_instance(data)
 
         try:
             account_id = int(data.get('_auth_user_id'))
@@ -38,3 +38,6 @@ class SessionStore(DBStore):
         obj.account_id = account_id
 
         return obj
+
+    def get_session_cookie_age(self):
+        return 60 * 60 * 24  # One day.

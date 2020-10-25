@@ -1,16 +1,17 @@
-"""
-Comparing two html documents.
-"""
+"""Compare two HTML documents."""
 
-import re
+from html.parser import HTMLParser
 
-from django.utils.html_parser import HTMLParseError, HTMLParser
+from django.utils.regex_helper import _lazy_re_compile
 
-WHITESPACE = re.compile(r'\s+')
+# ASCII whitespace is U+0009 TAB, U+000A LF, U+000C FF, U+000D CR, or U+0020
+# SPACE.
+# https://infra.spec.whatwg.org/#ascii-whitespace
+ASCII_WHITESPACE = _lazy_re_compile(r'[\t\n\f\r ]+')
 
 
 def normalize_whitespace(string):
-    return WHITESPACE.sub(' ', string)
+    return ASCII_WHITESPACE.sub(' ', string)
 
 
 class Element:
@@ -55,9 +56,7 @@ class Element:
                 child.finalize()
 
     def __eq__(self, element):
-        if not hasattr(element, 'name'):
-            return False
-        if hasattr(element, 'name') and self.name != element.name:
+        if not hasattr(element, 'name') or self.name != element.name:
             return False
         if len(self.attributes) != len(element.attributes):
             return False
@@ -74,12 +73,10 @@ class Element:
                     other_value = other_attr
                 if attr != other_attr or value != other_value:
                     return False
-        if self.children != element.children:
-            return False
-        return True
+        return self.children == element.children
 
     def __hash__(self):
-        return hash((self.name,) + tuple(a for a in self.attributes))
+        return hash((self.name, *self.attributes))
 
     def _count(self, element, count=True):
         if not isinstance(element, str):
@@ -89,6 +86,7 @@ class Element:
             if self.children == element.children:
                 return 1
         i = 0
+        elem_child_idx = 0
         for child in self.children:
             # child is text content and element is also text content, then
             # make a simple "text" in "text"
@@ -99,9 +97,26 @@ class Element:
                     elif element in child:
                         return 1
             else:
+                # Look for element wholly within this child.
                 i += child._count(element, count=count)
                 if not count and i:
                     return i
+                # Also look for a sequence of element's children among self's
+                # children. self.children == element.children is tested above,
+                # but will fail if self has additional children. Ex: '<a/><b/>'
+                # is contained in '<a/><b/><c/>'.
+                if isinstance(element, RootElement) and element.children:
+                    elem_child = element.children[elem_child_idx]
+                    # Start or continue match, advance index.
+                    if elem_child == child:
+                        elem_child_idx += 1
+                        # Match found, reset index.
+                        if elem_child_idx == len(element.children):
+                            i += 1
+                            elem_child_idx = 0
+                    # No match, reset index.
+                    else:
+                        elem_child_idx = 0
         return i
 
     def __contains__(self, element):
@@ -125,7 +140,7 @@ class Element:
             output += ''.join(str(c) for c in self.children)
             output += '\n</%s>' % self.name
         else:
-            output += ' />'
+            output += '>'
         return output
 
     def __repr__(self):
@@ -134,20 +149,27 @@ class Element:
 
 class RootElement(Element):
     def __init__(self):
-        super(RootElement, self).__init__(None, ())
+        super().__init__(None, ())
 
     def __str__(self):
         return ''.join(str(c) for c in self.children)
 
 
+class HTMLParseError(Exception):
+    pass
+
+
 class Parser(HTMLParser):
-    SELF_CLOSING_TAGS = (
-        'br', 'hr', 'input', 'img', 'meta', 'spacer', 'link', 'frame', 'base',
-        'col',
-    )
+    # https://html.spec.whatwg.org/#void-elements
+    SELF_CLOSING_TAGS = {
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
+        'param', 'source', 'track', 'wbr',
+        # Deprecated tags
+        'frame', 'spacer',
+    }
 
     def __init__(self):
-        HTMLParser.__init__(self)
+        super().__init__()
         self.root = RootElement()
         self.open_tags = []
         self.element_positions = {}
@@ -180,7 +202,7 @@ class Parser(HTMLParser):
         # Special case handling of 'class' attribute, so that comparisons of DOM
         # instances are not sensitive to ordering of classes.
         attrs = [
-            (name, " ".join(sorted(value.split(" "))))
+            (name, ' '.join(sorted(value for value in ASCII_WHITESPACE.split(value) if value)))
             if name == "class"
             else (name, value)
             for name, value in attrs
@@ -205,16 +227,10 @@ class Parser(HTMLParser):
     def handle_data(self, data):
         self.current.append(data)
 
-    def handle_charref(self, name):
-        self.current.append('&%s;' % name)
-
-    def handle_entityref(self, name):
-        self.current.append('&%s;' % name)
-
 
 def parse_html(html):
     """
-    Takes a string that contains *valid* HTML and turns it into a Python object
+    Take a string that contains *valid* HTML and turn it into a Python object
     structure that can be easily compared against other HTML on semantic
     equivalence. Syntactical differences like which quotation is used on
     arguments will be ignored.

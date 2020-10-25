@@ -17,15 +17,10 @@ from django.utils.timezone import is_aware
 
 
 class Serializer(PythonSerializer):
-    """
-    Convert a queryset to JSON.
-    """
+    """Convert a queryset to JSON."""
     internal_use_only = False
 
     def _init_options(self):
-        if json.__version__.split('.') >= ['2', '1', '3']:
-            # Use JS strings to represent Python Decimal instances (ticket #16850)
-            self.options.update({'use_decimal': False})
         self._current = None
         self.json_kwargs = self.options.copy()
         self.json_kwargs.pop('stream', None)
@@ -34,6 +29,7 @@ class Serializer(PythonSerializer):
             # Prevent trailing spaces
             self.json_kwargs['separators'] = (',', ': ')
         self.json_kwargs.setdefault('cls', DjangoJSONEncoder)
+        self.json_kwargs.setdefault('ensure_ascii', False)
 
     def start_serialization(self):
         self._init_options()
@@ -59,22 +55,19 @@ class Serializer(PythonSerializer):
         self._current = None
 
     def getvalue(self):
-        # Grand-parent super
+        # Grandparent super
         return super(PythonSerializer, self).getvalue()
 
 
 def Deserializer(stream_or_string, **options):
-    """
-    Deserialize a stream or string of JSON data.
-    """
+    """Deserialize a stream or string of JSON data."""
     if not isinstance(stream_or_string, (bytes, str)):
         stream_or_string = stream_or_string.read()
     if isinstance(stream_or_string, bytes):
-        stream_or_string = stream_or_string.decode('utf-8')
+        stream_or_string = stream_or_string.decode()
     try:
         objects = json.loads(stream_or_string)
-        for obj in PythonDeserializer(objects, **options):
-            yield obj
+        yield from PythonDeserializer(objects, **options)
     except (GeneratorExit, DeserializationError):
         raise
     except Exception as exc:
@@ -83,7 +76,8 @@ def Deserializer(stream_or_string, **options):
 
 class DjangoJSONEncoder(json.JSONEncoder):
     """
-    JSONEncoder subclass that knows how to encode date/time, decimal types and UUIDs.
+    JSONEncoder subclass that knows how to encode date/time, decimal types, and
+    UUIDs.
     """
     def default(self, o):
         # See "Date Time String Format" in the ECMA-262 specification.
@@ -108,4 +102,4 @@ class DjangoJSONEncoder(json.JSONEncoder):
         elif isinstance(o, (decimal.Decimal, uuid.UUID, Promise)):
             return str(o)
         else:
-            return super(DjangoJSONEncoder, self).default(o)
+            return super().default(o)

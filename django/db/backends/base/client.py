@@ -1,8 +1,5 @@
 class BaseDatabaseClient:
-    """
-    This class encapsulates all backend-specific methods for opening a
-    client shell.
-    """
+    """Encapsulate backend-specific methods for opening a client shell."""
     # This should be a string representing the name of the executable
     # (e.g., "psql"). Subclasses must override this.
     executable_name = None
@@ -11,5 +8,5 @@ class BaseDatabaseClient:
         # connection is an instance of BaseDatabaseWrapper.
         self.connection = connection
 
-    def runshell(self):
+    def runshell(self, parameters):
         raise NotImplementedError('subclasses of BaseDatabaseClient must provide a runshell() method')

@@ -1,4 +1,4 @@
-from unittest import skipIf
+from unittest import skipUnless
 
 from django.contrib.gis.db.models import fields
 from django.contrib.gis.geos import MultiPolygon, Polygon
@@ -10,17 +10,15 @@ from django.test import (
     TransactionTestCase, skipIfDBFeature, skipUnlessDBFeature,
 )
 
-from ..utils import mysql, spatialite
+from ..utils import mysql, oracle
 
-if connection.features.gis_enabled:
-    try:
-        GeometryColumns = connection.ops.geometry_columns()
-        HAS_GEOMETRY_COLUMNS = True
-    except NotImplementedError:
-        HAS_GEOMETRY_COLUMNS = False
+try:
+    GeometryColumns = connection.ops.geometry_columns()
+    HAS_GEOMETRY_COLUMNS = True
+except NotImplementedError:
+    HAS_GEOMETRY_COLUMNS = False
 
 
-@skipUnlessDBFeature('gis_enabled')
 class OperationTestCase(TransactionTestCase):
     available_apps = ['gis_tests.gis_migrations']
 
@@ -28,7 +26,7 @@ class OperationTestCase(TransactionTestCase):
         # Delete table after testing
         if hasattr(self, 'current_state'):
             self.apply_operations('gis', self.current_state, [migrations.DeleteModel('Neighborhood')])
-        super(OperationTestCase, self).tearDown()
+        super().tearDown()
 
     @property
     def has_spatial_indexes(self):
@@ -65,12 +63,9 @@ class OperationTestCase(TransactionTestCase):
         self.current_state = self.apply_operations('gis', ProjectState(), operations)
 
     def assertGeometryColumnsCount(self, expected_count):
-        table_name = 'gis_neighborhood'
-        if connection.features.uppercases_column_names:
-            table_name = table_name.upper()
         self.assertEqual(
             GeometryColumns.objects.filter(**{
-                GeometryColumns.table_name_col(): table_name,
+                '%s__iexact' % GeometryColumns.table_name_col(): 'gis_neighborhood',
             }).count(),
             expected_count
         )
@@ -103,7 +98,7 @@ class OperationTestCase(TransactionTestCase):
 class OperationTests(OperationTestCase):
 
     def setUp(self):
-        super(OperationTests, self).setUp()
+        super().setUp()
         self.set_up_test_model()
 
     def test_add_geom_field(self):
@@ -120,6 +115,13 @@ class OperationTests(OperationTestCase):
         # Test spatial indices when available
         if self.has_spatial_indexes:
             self.assertSpatialIndexExists('gis_neighborhood', 'path')
+
+    @skipUnless(HAS_GEOMETRY_COLUMNS, "Backend doesn't support GeometryColumns.")
+    def test_geom_col_name(self):
+        self.assertEqual(
+            GeometryColumns.geom_col_name(),
+            'column_name' if oracle else 'f_geometry_column',
+        )
 
     @skipUnlessDBFeature('supports_raster')
     def test_add_raster_field(self):
@@ -188,8 +190,7 @@ class OperationTests(OperationTestCase):
         if connection.features.supports_raster:
             self.assertSpatialIndexExists('gis_neighborhood', 'rast', raster=True)
 
-    @skipUnlessDBFeature("supports_3d_storage")
-    @skipIf(spatialite, "Django currently doesn't support altering Spatialite geometry fields")
+    @skipUnlessDBFeature('can_alter_geometry_field', 'supports_3d_storage')
     def test_alter_geom_field_dim(self):
         Neighborhood = self.current_state.apps.get_model('gis', 'Neighborhood')
         p1 = Polygon(((0, 0), (0, 1), (1, 1), (1, 0), (0, 0)))
